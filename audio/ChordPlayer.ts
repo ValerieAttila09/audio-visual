@@ -1,45 +1,83 @@
 export class ChordPlayer {
-	private context: AudioContext;
-	private buffers: Map<String, AudioBuffer>;
+	private context: AudioContext | null = null;
+	private buffers: Map<string, AudioBuffer>;
+	private currentSource: AudioBufferSourceNode | null = null;
 
 	constructor() {
-		this.context = new AudioContext();
 		this.buffers = new Map();
 	}
 
+	private getOrCreateContext(): AudioContext {
+		if (!this.context) {
+			const AudioContextClass =
+				window.AudioContext || (window as any).webkitAudioContext;
+			this.context = new AudioContextClass();
+		}
+		return this.context;
+	}
+
+	async resumeAudioContext() {
+		const ctx = this.getOrCreateContext();
+		if (ctx.state === "suspended") {
+			await ctx.resume();
+		}
+	}
 
 	async loadChord(name: string) {
-		const response = await fetch(`audio/chords/${name}.wav`);
+		const ctx = this.getOrCreateContext();
+		const response = await fetch(`/audio/chords/${name}_Major_Chord.wav`);
+		if (!response.ok) {
+			throw new Error(
+				`Failed to load chord ${name} from /audio/chords/${name}_Major_Chord.wav`
+			);
+		}
 		const arrayBuffer = await response.arrayBuffer();
-		const audioBuffer = await this.context.decodeAudioData(arrayBuffer);
+		const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
 		this.buffers.set(name, audioBuffer);
 	}
 
-	async loadAll() {
-		const chords = {
-			C: { chord: "C Major", path: 'audio/C_Major_Chord.wav', },
-			D: { chord: "D Major", path: 'audio/D_Major_Chord.wav', },
-			E: { chord: "E Major", path: 'audio/E_Major_Chord.wav', },
-			F: { chord: "F Major", path: 'audio/F_Major_Chord.wav', },
-			G: { chord: "G Major", path: 'audio/G_Major_Chord.wav', },
-			A: { chord: "A Major", path: 'audio/A_Major_Chord.wav', },
-			B: { chord: "B Major", path: 'audio/B_Major_Chord.wav', }
-		}
-
+	async loadAll(onProgress?: (loaded: number, total: number) => void) {
+		const chordKeys = ["C", "D", "E", "F", "G", "A", "B"];
+		let loadedCount = 0;
 		await Promise.all(
-			Object.keys(chords).map((name)=> this.loadChord(name))
-		)
+			chordKeys.map(async (name) => {
+				await this.loadChord(name);
+				loadedCount++;
+				if (onProgress) onProgress(loadedCount, chordKeys.length);
+			})
+		);
 	}
 
 	playChord(name: string) {
+		this.stopChord();
+
 		const buffer = this.buffers.get(name);
 		if (!buffer) {
 			console.error(`Chord ${name} not found`);
 			return;
 		}
-		const source = this.context.createBufferSource();
+
+		const ctx = this.getOrCreateContext();
+		if (ctx.state === "suspended") {
+			ctx.resume();
+		}
+
+		const source = ctx.createBufferSource();
 		source.buffer = buffer;
-		source.connect(this.context.destination);
+		source.connect(ctx.destination);
 		source.start();
+		this.currentSource = source;
 	}
-}
+
+	stopChord() {
+		if (this.currentSource) {
+			try {
+				this.currentSource.stop();
+				this.currentSource.disconnect();
+			} catch (e) {
+				// Ignore if already stopped
+			}
+			this.currentSource = null;
+		}
+	}
+}

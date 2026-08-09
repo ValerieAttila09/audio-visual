@@ -80,7 +80,7 @@ export default function ChordBoard() {
           const spacing = width / (n + 1);
           const x = Math.round(spacing * (i + 1));
           const y = height - 120; // near bottom
-          return { key: k, variants: chordsJson[k], x, y, r: radius };
+          return { key: k, variants: (chordsJson as Record<string, string[]>)[k] || [], x, y, r: radius };
         });
       }
 

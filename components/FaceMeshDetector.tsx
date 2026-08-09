@@ -1,30 +1,40 @@
-"use client"; // Ensure this runs only on the client in Next.js 13+
+"use client";
 
 import React, { useEffect, useRef } from "react";
 
 export default function FaceMeshDetector() {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    let cameraInstance;
+    let cameraInstance: any = null;
 
-    // Ensure this runs only in the browser
     if (typeof window !== "undefined") {
       (async () => {
-        // Load mediapipe UMD bundles which attach globals to window
-        const [cameraMod, faceMeshMod, handLandMarker] = await Promise.all([
+        const [cameraMod, faceMeshMod] = await Promise.all([
           import("@mediapipe/camera_utils"),
           import("@mediapipe/face_mesh"),
         ]);
         const globalAny = window as any;
-        const Camera = globalAny.Camera || cameraMod?.Camera || cameraMod?.default?.Camera || globalAny.camera_utils || globalAny.cameraUtils;
+        const Camera =
+          globalAny.Camera ||
+          cameraMod?.Camera ||
+          cameraMod?.default?.Camera ||
+          globalAny.camera_utils ||
+          globalAny.cameraUtils;
 
-        // Resolve FaceMesh constructor from globals or module exports (UMD sometimes attaches to window as a namespace)
-        let FaceMesh: any = globalAny.FaceMesh || faceMeshMod?.FaceMesh || faceMeshMod?.default?.FaceMesh || faceMeshMod?.default || globalAny.faceMesh || globalAny.mediapipe && globalAny.mediapipe.FaceMesh;
+        let FaceMesh: any =
+          globalAny.FaceMesh ||
+          faceMeshMod?.FaceMesh ||
+          faceMeshMod?.default?.FaceMesh ||
+          faceMeshMod?.default ||
+          globalAny.faceMesh ||
+          (globalAny.mediapipe && globalAny.mediapipe.FaceMesh);
         if (!FaceMesh || typeof FaceMesh !== "function") {
-          // If it's a namespace object (e.g., window.faceMesh.FaceMesh), try that
-          FaceMesh = (globalAny.faceMesh && globalAny.faceMesh.FaceMesh) || (faceMeshMod && faceMeshMod.FaceMesh) || (faceMeshMod && faceMeshMod.default && faceMeshMod.default.FaceMesh);
+          FaceMesh =
+            (globalAny.faceMesh && globalAny.faceMesh.FaceMesh) ||
+            (faceMeshMod && faceMeshMod.FaceMesh) ||
+            (faceMeshMod && faceMeshMod.default && faceMeshMod.default.FaceMesh);
         }
 
         if (!FaceMesh || typeof FaceMesh !== "function") {
@@ -33,7 +43,7 @@ export default function FaceMeshDetector() {
         }
 
         const faceMesh = new FaceMesh({
-          locateFile: (file) =>
+          locateFile: (file: string) =>
             `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
         });
 
@@ -44,25 +54,22 @@ export default function FaceMeshDetector() {
           minTrackingConfidence: 0.5,
         });
 
-        faceMesh.onResults((results) => {
-          const canvasCtx = canvasRef.current.getContext("2d");
-          canvasCtx.save();
-          canvasCtx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
-          canvasCtx.drawImage(
-            results.image,
-            0,
-            0,
-            canvasRef.current.width,
-            canvasRef.current.height
-          );
+        faceMesh.onResults((results: any) => {
+          const canvas = canvasRef.current;
+          if (!canvas) return;
+          const canvasCtx = canvas.getContext("2d");
+          if (!canvasCtx) return;
 
-          // Draw landmarks
+          canvasCtx.save();
+          canvasCtx.clearRect(0, 0, canvas.width, canvas.height);
+          canvasCtx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
           if (results.multiFaceLandmarks) {
             canvasCtx.fillStyle = "red";
-            results.multiFaceLandmarks.forEach((landmarks) => {
-              landmarks.forEach((point) => {
+            results.multiFaceLandmarks.forEach((landmarks: any[]) => {
+              landmarks.forEach((point: any) => {
                 canvasCtx.beginPath();
-                canvasCtx.arc(point.x * canvasRef.current.width, point.y * canvasRef.current.height, 1.5, 0, 2 * Math.PI);
+                canvasCtx.arc(point.x * canvas.width, point.y * canvas.height, 1.5, 0, 2 * Math.PI);
                 canvasCtx.fill();
               });
             });
@@ -70,30 +77,30 @@ export default function FaceMeshDetector() {
           canvasCtx.restore();
         });
 
-        // Start camera
         if (!Camera) {
           console.error("Could not find Camera constructor.", cameraMod, globalAny);
           return;
         }
         if (videoRef.current) {
-                  // Allow autoplay without user interaction by muting the video and enabling autoplay/playsInline
-                  try {
-                    videoRef.current.muted = true;
-                    videoRef.current.autoplay = true;
-                    videoRef.current.playsInline = true;
-                  } catch (e) {
-                    // ignore if properties can't be set
-                  }
+          try {
+            videoRef.current.muted = true;
+            videoRef.current.autoplay = true;
+            videoRef.current.playsInline = true;
+          } catch (e) {
+            // ignore
+          }
 
-                  cameraInstance = new Camera(videoRef.current, {
-                    onFrame: async () => {
-                      await faceMesh.send({ image: videoRef.current });
-                    },
-                    width: 640,
-                    height: 480,
-                  });
-                  cameraInstance.start();
-                }
+          cameraInstance = new Camera(videoRef.current, {
+            onFrame: async () => {
+              if (videoRef.current) {
+                await faceMesh.send({ image: videoRef.current });
+              }
+            },
+            width: 640,
+            height: 480,
+          });
+          cameraInstance.start();
+        }
       })();
     }
 
@@ -106,8 +113,9 @@ export default function FaceMeshDetector() {
 
   return (
     <div style={{ position: "relative" }}>
-      <video ref={videoRef} style={{ display: "none" }} playsInline muted autoPlay></video>
+      <video ref={videoRef} style={{ display: "none" }} playsInline muted autoPlay />
       <canvas ref={canvasRef} width={640} height={480} />
     </div>
   );
 }
+
