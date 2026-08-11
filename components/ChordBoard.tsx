@@ -19,6 +19,7 @@ export default function ChordBoard() {
 
   // chord buttons will be computed based on canvas size
   const boardRef = useRef<ChordBoardItem[]>([]);
+  const ringRef = useRef({ x: 0, y: 0, outerRadius: 0, innerRadius: 0 });
 
   useEffect(() => {
     let mounted = true;
@@ -68,19 +69,29 @@ export default function ChordBoard() {
       });
       handRef.current = handLandmarker;
 
-      // helper: build chord board layout
+      // helper: build chord board layout as a donut on the right
       function layoutBoard() {
-        const pad = 24;
         const width = canvas.width;
         const height = canvas.height;
         const keys = Object.keys(chordsJson);
         const n = keys.length;
-        const radius = Math.min(48, Math.floor(width / (n * 2.5)));
+        const outerRadius = Math.min(180, Math.floor(Math.min(width, height) * 0.32));
+        const centerX = width - outerRadius - 40;
+        const centerY = height / 2;
+        const buttonRadius = Math.min(32, Math.max(22, Math.floor(outerRadius / (n * 0.8))));
+
+        ringRef.current = {
+          x: centerX,
+          y: centerY,
+          outerRadius,
+          innerRadius: Math.max(outerRadius * 0.55, outerRadius - 60),
+        };
+
         boardRef.current = keys.map((k, i) => {
-          const spacing = width / (n + 1);
-          const x = Math.round(spacing * (i + 1));
-          const y = height - 120; // near bottom
-          return { key: k, variants: (chordsJson as Record<string, string[]>)[k] || [], x, y, r: radius };
+          const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+          const x = Math.round(centerX + Math.cos(angle) * (outerRadius * 0.76));
+          const y = Math.round(centerY + Math.sin(angle) * (outerRadius * 0.76));
+          return { key: k, variants: (chordsJson as Record<string, string[]>)[k] || [], x, y, r: buttonRadius };
         });
       }
 
@@ -167,22 +178,45 @@ export default function ChordBoard() {
           }
         }
 
+        // draw donut ring on right side
+        const ring = ringRef.current;
+        if (ring.outerRadius > 0) {
+          ctx.save();
+          ctx.beginPath();
+          ctx.fillStyle = "rgba(0,0,0,0.35)";
+          ctx.arc(ring.x, ring.y, ring.outerRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, ring.innerRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
+          ctx.strokeStyle = "rgba(255,255,255,0.2)";
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, ring.outerRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, ring.innerRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+
         // draw chord buttons (canvas-only UI)
         for (const item of boardRef.current) {
           // base style
           ctx.save();
           ctx.beginPath();
-          ctx.fillStyle = hovered === item ? "#ffcc00" : "rgba(0,0,0,0.45)";
-          ctx.strokeStyle = "rgba(255,255,255,0.15)";
+          ctx.fillStyle = hovered === item ? "#ffcc00" : "rgba(255,255,255,0.85)";
+          ctx.strokeStyle = hovered === item ? "#ff8c00" : "rgba(255,255,255,0.5)";
           ctx.lineWidth = 2;
-          // rounded rect simulated by arc+rect
           ctx.arc(item.x, item.y, item.r, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
 
           // label
-          ctx.fillStyle = "#000";
-          ctx.font = `${Math.max(18, item.r / 1.8)}px Arial`;
+          ctx.fillStyle = hovered === item ? "#000" : "#000";
+          ctx.font = `${Math.max(14, item.r / 1.6)}px Arial`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(item.key, item.x, item.y);
