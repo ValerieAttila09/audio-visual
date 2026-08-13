@@ -38,4 +38,5 @@ Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/bui
 to resume the conversation with copilot, use:
 ```
 copilot --resume=c4923455-8404-4336-a967-7118de638f49
+copilot --resume=c4923455-8404-4336-a967-7118de638f49
 ```

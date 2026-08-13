@@ -284,12 +284,13 @@ export default function CombinedTracker() {
         if (detectedHoveredChord) {
           const hoveredKey = detectedHoveredChord.key;
           if (activeChordRef.current !== hoveredKey) {
-            // ENTER / SWITCH CHORD: Trigger sound once
-            activeChordRef.current = hoveredKey;
-            setCurrentActiveChord(hoveredKey);
-            if (chordPlayerRef.current) {
-              chordPlayerRef.current.playChord(hoveredKey);
-            }
+          // ENTER / SWITCH CHORD: Trigger sound once (play major variant)
+          const chordName = `${hoveredKey}maj`;
+          activeChordRef.current = chordName;
+          setCurrentActiveChord(chordName);
+          if (chordPlayerRef.current) {
+            chordPlayerRef.current.playChord(chordName);
+          }
           }
           // HOVER: If activeChordRef.current === hoveredKey, do not re-trigger playChord!
         } else {
@@ -472,7 +473,7 @@ export default function CombinedTracker() {
             />
             <span className="text-xs font-mono text-slate-400">CHORD ACTIVE:</span>
             <span className="text-base font-bold text-amber-400 min-w-8">
-              {currentActiveChord ? `${currentActiveChord} Major` : "None (Lepas)"}
+              {currentActiveChord ? `${currentActiveChord.replace(/maj$/, '')} ${currentActiveChord.endsWith('maj') ? 'Major' : currentActiveChord.endsWith('min') ? 'Minor' : ''}` : "None (Lepas)"}
             </span>
           </div>
         )}

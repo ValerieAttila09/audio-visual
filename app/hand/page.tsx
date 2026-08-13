@@ -1,9 +1,9 @@
-import ChordBoard from "@/components/ChordBoard";
+import GestureChordTracker from "@/components/GestureChordTracker";
 
 export default function handPage() {
 	return (
 		<>
-			<ChordBoard />
+			<GestureChordTracker />
 		</>
 	)
 }

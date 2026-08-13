@@ -23,13 +23,30 @@ export class ChordPlayer {
 		}
 	}
 
+	// try loading common file extensions and naming conventions
+	private async tryFetchChordPaths(name: string): Promise<Response | null> {
+		const candidates = [
+			`/audio/chords/${name}.mp3`,
+			`/audio/chords/${name}.wav`,
+			`/audio/chords/${name}_Major_Chord.wav`,
+			`/audio/chords/${name}_major.mp3`,
+		];
+		for (const p of candidates) {
+			try {
+				const res = await fetch(p);
+				if (res.ok) return res;
+			} catch (e) {
+				// ignore and try next
+			}
+		}
+		return null;
+	}
+
 	async loadChord(name: string) {
 		const ctx = this.getOrCreateContext();
-		const response = await fetch(`/audio/chords/${name}_Major_Chord.wav`);
-		if (!response.ok) {
-			throw new Error(
-				`Failed to load chord ${name} from /audio/chords/${name}_Major_Chord.wav`
-			);
+		const response = await this.tryFetchChordPaths(name);
+		if (!response) {
+			throw new Error(`Failed to load chord ${name} from public/audio/chords/`);
 		}
 		const arrayBuffer = await response.arrayBuffer();
 		const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
@@ -37,18 +54,36 @@ export class ChordPlayer {
 	}
 
 	async loadAll(onProgress?: (loaded: number, total: number) => void) {
-		const chordKeys = ["C", "D", "E", "F", "G", "A", "B"];
+		// load major/minor sequences used by the app
+		const chordKeys = [
+			"Cmaj",
+			"Dmaj",
+			"Emaj",
+			"Fmaj",
+			"Gmaj",
+			"Amaj",
+			"Bmaj",
+			"Cmin",
+			"Dmin",
+			"Emin",
+			"Fmin",
+			"Gmin",
+			"Amin",
+			"Bmin",
+		];
 		let loadedCount = 0;
-		await Promise.all(
-			chordKeys.map(async (name) => {
+		for (const name of chordKeys) {
+			try {
 				await this.loadChord(name);
-				loadedCount++;
-				if (onProgress) onProgress(loadedCount, chordKeys.length);
-			})
-		);
+			} catch (e) {
+				console.warn(`Failed to load ${name}:`, e);
+			}
+			loadedCount++;
+			if (onProgress) onProgress(loadedCount, chordKeys.length);
+		}
 	}
 
-	playChord(name: string) {
+	playChord(name: string, pitchFactor = 1) {
 		this.stopChord();
 
 		const buffer = this.buffers.get(name);
@@ -64,7 +99,10 @@ export class ChordPlayer {
 
 		const source = ctx.createBufferSource();
 		source.buffer = buffer;
-		source.connect(ctx.destination);
+		source.playbackRate.value = pitchFactor;
+		const gain = ctx.createGain();
+		gain.gain.value = 1;
+		source.connect(gain).connect(ctx.destination);
 		source.start();
 		this.currentSource = source;
 	}
@@ -80,4 +118,4 @@ export class ChordPlayer {
 			this.currentSource = null;
 		}
 	}
-}
+}
