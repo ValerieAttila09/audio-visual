@@ -8,6 +8,7 @@ type ChordButtonItem = {
   x: number;
   y: number;
   r: number;
+  angle: number;
 };
 
 type AppState =
@@ -33,6 +34,7 @@ export default function CombinedTracker() {
   const chordPlayerRef = useRef<ChordPlayer | null>(null);
   const activeChordRef = useRef<string | null>(null);
   const chordButtonsRef = useRef<ChordButtonItem[]>([]);
+  const ringRef = useRef({ x: 0, y: 0, outerRadius: 0, innerRadius: 0 });
 
   const [appState, setAppState] = useState<AppState>("IDLE");
   const [statusMessage, setStatusMessage] = useState<string>("");
@@ -50,16 +52,23 @@ export default function CombinedTracker() {
     };
   }, []);
 
-  // Compute chord button positions when canvas resizes
+  // Compute chord button positions when canvas resizes in a donut layout
   const updateLayoutBoard = (width: number, height: number) => {
     const n = CHORD_KEYS.length;
-    const radius = Math.min(46, Math.floor(width / (n * 2.3)));
-    const spacing = width / (n + 1);
-    const y = height - 75; // bottom placement
+    const outerRadius = Math.min(180, Math.floor(Math.min(width, height) * 0.32));
+    const innerRadius = Math.max(outerRadius * 0.55, outerRadius - 70);
+    const centerX = width - outerRadius - 32;
+    const centerY = height / 2;
+    const buttonRadius = Math.min(32, Math.max(20, Math.floor(outerRadius / (n * 0.9))));
+
+    ringRef.current = { x: centerX, y: centerY, outerRadius, innerRadius };
 
     chordButtonsRef.current = CHORD_KEYS.map((key, i) => {
-      const x = Math.round(spacing * (i + 1));
-      return { key, x, y, r: radius };
+      const angle = (Math.PI * 2 * i) / n - Math.PI / 2;
+      const radius = (outerRadius + innerRadius) / 2;
+      const x = Math.round(centerX + Math.cos(angle) * radius);
+      const y = Math.round(centerY + Math.sin(angle) * radius);
+      return { key, x, y, r: buttonRadius, angle };
     });
   };
 
@@ -304,6 +313,73 @@ export default function CombinedTracker() {
           }
         }
 
+        // Draw donut ring on the right side
+        const ring = ringRef.current;
+        if (ring.outerRadius > 0) {
+          ctx.save();
+
+          const ringGradient = ctx.createRadialGradient(
+            ring.x,
+            ring.y,
+            ring.innerRadius * 0.6,
+            ring.x,
+            ring.y,
+            ring.outerRadius
+          );
+          ringGradient.addColorStop(0, "rgba(15, 23, 42, 0.1)");
+          ringGradient.addColorStop(0.7, "rgba(15, 23, 42, 0.75)");
+          ringGradient.addColorStop(1, "rgba(30, 41, 59, 0.9)");
+
+          ctx.beginPath();
+          ctx.fillStyle = ringGradient;
+          ctx.arc(ring.x, ring.y, ring.outerRadius, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.globalCompositeOperation = "destination-out";
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, ring.innerRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.globalCompositeOperation = "source-over";
+
+          ctx.strokeStyle = "rgba(255,255,255,0.22)";
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, ring.outerRadius, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.beginPath();
+          ctx.arc(ring.x, ring.y, ring.innerRadius, 0, Math.PI * 2);
+          ctx.stroke();
+
+          // Draw chord segment separators
+          ctx.strokeStyle = "rgba(255,255,255,0.15)";
+          ctx.lineWidth = 1.5;
+          for (const item of chordButtonsRef.current) {
+            ctx.beginPath();
+            const x1 = ring.x + Math.cos(item.angle) * ring.innerRadius;
+            const y1 = ring.y + Math.sin(item.angle) * ring.innerRadius;
+            const x2 = ring.x + Math.cos(item.angle) * ring.outerRadius;
+            const y2 = ring.y + Math.sin(item.angle) * ring.outerRadius;
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+          }
+
+          ctx.restore();
+        }
+
+        // Draw chord label inside the ring hole
+        if (ring.outerRadius > 0) {
+          ctx.save();
+          ctx.fillStyle = "rgba(255,255,255,0.9)";
+          ctx.font = `700 ${Math.max(18, Math.floor(ring.innerRadius / 4.5))}px Inter, sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText("CIRCLE", ring.x, ring.y - 10);
+          ctx.font = `600 ${Math.max(14, Math.floor(ring.innerRadius / 6.2))}px Inter, sans-serif`;
+          ctx.fillText("OF CHORDS", ring.x, ring.y + 18);
+          ctx.restore();
+        }
+
         // Draw Chord Buttons UI on Canvas
         for (const item of chordButtonsRef.current) {
           const isActive = activeChordRef.current === item.key;
@@ -318,22 +394,22 @@ export default function CombinedTracker() {
             ctx.shadowColor = "#F59E0B";
             ctx.shadowBlur = 20;
           } else if (isHovered) {
-            ctx.fillStyle = "#3B82F6"; // Blue hover state
-            ctx.shadowColor = "#3B82F6";
-            ctx.shadowBlur = 12;
+            ctx.fillStyle = "#38BDF8"; // Blue hover state
+            ctx.shadowColor = "#38BDF8";
+            ctx.shadowBlur = 14;
           } else {
-            ctx.fillStyle = "rgba(15, 23, 42, 0.75)";
+            ctx.fillStyle = "rgba(15, 23, 42, 0.95)";
             ctx.shadowBlur = 0;
           }
 
           ctx.fill();
 
           ctx.lineWidth = isActive ? 4 : 2;
-          ctx.strokeStyle = isActive ? "#FFFFFF" : isHovered ? "#93C5FD" : "rgba(255, 255, 255, 0.4)";
+          ctx.strokeStyle = isActive ? "#FFFFFF" : isHovered ? "#93C5FD" : "rgba(255, 255, 255, 0.5)";
           ctx.stroke();
 
           // Button Label
-          ctx.fillStyle = isActive ? "#000000" : "#FFFFFF";
+          ctx.fillStyle = isActive ? "#111827" : "#FFFFFF";
           ctx.font = `bold ${Math.max(18, Math.floor(item.r / 1.6))}px Inter, sans-serif`;
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
