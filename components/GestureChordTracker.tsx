@@ -20,6 +20,16 @@ type AppState =
   | "READY"
   | "ERROR";
 
+const CHORD_CARDS = [
+  { note: "C", key: "C", fingers: "1 finger" },
+  { note: "D", key: "D", fingers: "2 fingers" },
+  { note: "E", key: "E", fingers: "3 fingers" },
+  { note: "F", key: "F", fingers: "4 fingers" },
+  { note: "G", key: "G", fingers: "5 fingers" },
+  { note: "A", key: "A", fingers: "index + pinky" },
+  { note: "B", key: "B", fingers: "index + pinky + 1" },
+];
+
 export default function GestureChordTracker() {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -33,6 +43,8 @@ export default function GestureChordTracker() {
 
   const gestureHistoryRef = useRef<Array<{ left: FingerState; right: FingerState }>>([]);
 
+  const wavePhaseRef = useRef<number>(0);
+
   const [appState, setAppState] = useState<AppState>("IDLE");
   const [statusMessage, setStatusMessage] = useState<string>("");
   const [errorMessage, setErrorMessage] = useState<string>("");
@@ -40,6 +52,7 @@ export default function GestureChordTracker() {
 
   const [leftCount, setLeftCount] = useState<number>(0);
   const [rightCount, setRightCount] = useState<number>(0);
+  const [tonePercent, setTonePercent] = useState<number>(0);
 
   useEffect(() => {
     chordPlayerRef.current = new ChordPlayer();
@@ -57,25 +70,22 @@ export default function GestureChordTracker() {
     const isLeftIndexPinky = left.index && left.pinky && !left.middle && !left.ring && !left.thumb;
     const isLeftIndexPinkyPlusAny = left.index && left.pinky && (left.middle || left.ring || left.thumb);
 
-    if (countRight === 1) {
-      if (countLeft === 1) return "Cmaj";
-      if (countLeft === 2 && !isLeftIndexPinky) return "Dmaj";
-      if (countLeft === 3 && !isLeftIndexPinkyPlusAny) return "Emaj";
-      if (countLeft === 4) return "Fmaj";
-      if (countLeft === 5) return "Gmaj";
-      if (isLeftIndexPinky) return "Amaj";
-      if (isLeftIndexPinkyPlusAny) return "Bmaj";
-    }
+    let rootNote: string | null = null;
+    if (countLeft === 1) rootNote = "C";
+    else if (countLeft === 2 && !isLeftIndexPinky) rootNote = "D";
+    else if (countLeft === 3 && !isLeftIndexPinkyPlusAny) rootNote = "E";
+    else if (countLeft === 4) rootNote = "F";
+    else if (countLeft === 5) rootNote = "G";
+    else if (isLeftIndexPinky) rootNote = "A";
+    else if (isLeftIndexPinkyPlusAny) rootNote = "B";
 
-    if (countRight === 2) {
-      if (countLeft === 1) return "Cmin";
-      if (countLeft === 2 && !isLeftIndexPinky) return "Dmin";
-      if (countLeft === 3 && !isLeftIndexPinkyPlusAny) return "Emin";
-      if (countLeft === 4) return "Fmin";
-      if (countLeft === 5) return "Gmin";
-      if (isLeftIndexPinky) return "Amin";
-      if (isLeftIndexPinkyPlusAny) return "Bmin";
-    }
+    if (!rootNote) return null;
+
+    if (countRight === 1) return `${rootNote}maj`; // Major
+    if (countRight === 2) return `${rootNote}min`; // Minor
+    if (countRight === 3) return `${rootNote}dim`; // Diminished
+    if (countRight === 4) return `${rootNote}aug`; // Augmented
+    if (countRight === 5) return `${rootNote}7`;   // Seventh
 
     return null;
   }
@@ -112,6 +122,21 @@ export default function GestureChordTracker() {
     };
   }
 
+  // Hitung Sudut Kemiringan Jari/Tangan
+  function computeHandTiltDeg(landmarks: any[]): number {
+    const wrist = landmarks[0];
+    const middleMcp = landmarks[9];
+
+    const dx = middleMcp.x - wrist.x;
+    const dy = middleMcp.y - wrist.y;
+
+    let rad = Math.atan2(dy, dx);
+    let deg = (rad * 180) / Math.PI + 90;
+
+    if (deg > 180) deg -= 360;
+    return Math.max(-90, Math.min(90, deg));
+  }
+
   function getSmoothedFingerState(history: Array<{ left: FingerState; right: FingerState }>) {
     if (history.length === 0) {
       const empty: FingerState = { thumb: false, index: false, middle: false, ring: false, pinky: false };
@@ -135,6 +160,51 @@ export default function GestureChordTracker() {
     return { left: smoothLeft, right: smoothRight };
   }
 
+  function drawSoundwaves(
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number,
+    numWaves: number,
+    isPlaying: boolean,
+    phase: number
+  ) {
+    if (numWaves <= 0) return;
+
+    const baseLineY = height - 120;
+    const waveLength = 0.012;
+
+    ctx.save();
+    ctx.shadowBlur = isPlaying ? 15 : 6;
+    ctx.shadowColor = "#f59e0b";
+
+    for (let i = 0; i < numWaves; i++) {
+      ctx.beginPath();
+      ctx.lineWidth = isPlaying ? 2.5 : 1.5;
+
+      const opacity = isPlaying ? 1 - i * 0.15 : 0.6 - i * 0.1;
+      ctx.strokeStyle = `rgba(245, 158, 11, ${Math.max(opacity, 0.2)})`;
+
+      const amplitude = isPlaying ? 14 + i * 4 : 4 + i * 2;
+      const speedOffset = i * 0.8;
+      const yOffset = (i - (numWaves - 1) / 2) * 8;
+
+      for (let x = 0; x <= width; x += 6) {
+        const y =
+          baseLineY +
+          yOffset +
+          Math.sin(x * waveLength + phase + speedOffset) * amplitude * Math.cos(x * 0.003);
+
+        if (x === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   const handleStart = async () => {
     try {
       setErrorMessage("");
@@ -147,7 +217,7 @@ export default function GestureChordTracker() {
       await chordPlayerRef.current.resumeAudioContext();
 
       setAppState("LOADING_CHORDS");
-      setStatusMessage("2/3 Loading Audio Tracks...");
+      setStatusMessage("2/3 Loading Sound Samples...");
       await chordPlayerRef.current.loadAll((loaded, total) => {
         setStatusMessage(`2/3 Loading Audio Tracks (${loaded}/${total})...`);
       });
@@ -199,7 +269,6 @@ export default function GestureChordTracker() {
         const canvas = canvasRef.current;
         if (!videoEl || !canvas) return;
 
-        // Auto Resize Canvas Sesuai Ukuran Layar/Window
         const containerWidth = window.innerWidth;
         const containerHeight = window.innerHeight;
 
@@ -224,11 +293,9 @@ export default function GestureChordTracker() {
         ctx.save();
         ctx.clearRect(0, 0, w, h);
 
-        // Render Kamera Mirror secara Full Screen (Cover)
         ctx.save();
         ctx.scale(-1, 1);
-        
-        // Menjaga Aspek Rasio Video Kamera saat Digambar ke Canvas Layar Penuh
+
         const videoAspect = videoEl.videoWidth / (videoEl.videoHeight || 1);
         const canvasAspect = w / h;
         let drawW = w;
@@ -247,8 +314,12 @@ export default function GestureChordTracker() {
         ctx.drawImage(videoEl, -drawW - xOffset, yOffset, drawW, drawH);
         ctx.restore();
 
+        ctx.fillStyle = "rgba(10, 15, 20, 0.65)";
+        ctx.fillRect(0, 0, w, h);
+
         let rawLeftState: FingerState = { thumb: false, index: false, middle: false, ring: false, pinky: false };
         let rawRightState: FingerState = { thumb: false, index: false, middle: false, ring: false, pinky: false };
+        let detectedTiltDeg = 0;
 
         if (handResults && handResults.landmarks && handResults.landmarks.length > 0) {
           const HAND_CONNECTIONS = [
@@ -262,16 +333,14 @@ export default function GestureChordTracker() {
 
           for (let i = 0; i < handResults.landmarks.length; i++) {
             const landmarks = handResults.landmarks[i];
-            const handedness = handResults.handedness[i]?.[0]?.categoryName;
 
-            ctx.strokeStyle = handedness === "Left" ? "#3B82F6" : "#10B981";
-            ctx.lineWidth = 3;
+            ctx.strokeStyle = "rgba(45, 212, 191, 0.4)";
+            ctx.lineWidth = 2;
 
             for (const [start, end] of HAND_CONNECTIONS) {
               const p1 = landmarks[start];
               const p2 = landmarks[end];
               if (p1 && p2) {
-                // Pemetaan koordinat landmark ke skala canvas full screen
                 const x1 = (1 - p1.x) * drawW + xOffset;
                 const y1 = p1.y * drawH + yOffset;
                 const x2 = (1 - p2.x) * drawW + xOffset;
@@ -291,9 +360,17 @@ export default function GestureChordTracker() {
               rawLeftState = state;
             } else {
               rawRightState = state;
+              // === DIPERBARUI: Kemiringan Tone sekarang diambil dari Tangan Kanan ===
+              detectedTiltDeg = computeHandTiltDeg(landmarks);
             }
           }
         }
+
+        const rawTonePercent = Math.round((-detectedTiltDeg / 90) * 100);
+        const clampedTonePercent = Math.max(-100, Math.min(100, rawTonePercent));
+        setTonePercent(clampedTonePercent);
+
+        const pitchFactor = 1 + clampedTonePercent / 100;
 
         gestureHistoryRef.current.push({ left: rawLeftState, right: rawRightState });
         if (gestureHistoryRef.current.length > 5) {
@@ -313,17 +390,13 @@ export default function GestureChordTracker() {
         const COOLDOWN_MS = 500;
 
         if (detectedChord) {
-          if (
-            activeChordRef.current !== detectedChord ||
-            now - lastTriggerTimeRef.current > COOLDOWN_MS
-          ) {
-            activeChordRef.current = detectedChord;
-            setCurrentActiveChord(detectedChord);
-            lastTriggerTimeRef.current = now;
+          activeChordRef.current = detectedChord;
+          setCurrentActiveChord(detectedChord);
 
-            if (chordPlayerRef.current) {
-              chordPlayerRef.current.playChord(detectedChord);
-            }
+          if (chordPlayerRef.current) {
+            // Karena ChordPlayer sudah menangani pemutaran mulus, 
+            // panggil playChord terus-menerus tanpa takut terpotong!
+            chordPlayerRef.current.playChord(detectedChord, pitchFactor);
           }
         } else {
           if (activeChordRef.current !== null) {
@@ -335,23 +408,15 @@ export default function GestureChordTracker() {
           }
         }
 
-        // Overlay Status UI pada Posisi Kiri Atas Screen
-        ctx.save();
-        ctx.fillStyle = "rgba(15, 23, 42, 0.85)";
-        ctx.fillRect(24, 24, 320, 105);
-        ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-        ctx.strokeRect(24, 24, 320, 105);
-
-        ctx.fillStyle = "#FFFFFF";
-        ctx.font = "bold 14px Inter, sans-serif";
-        ctx.fillText(`Jari Tangan Kiri  : ${activeLeftFingers} Jari`, 40, 52);
-        ctx.fillText(`Jari Tangan Kanan : ${activeRightFingers} Jari`, 40, 76);
-        ctx.fillText(
-          `Mode Playback     : ${activeRightFingers === 1 ? "Major (1 Kanan)" : activeRightFingers === 2 ? "Minor (2 Kanan)" : "Menunggu..."}`,
-          40,
-          100
+        wavePhaseRef.current += detectedChord ? 0.08 : 0.03;
+        drawSoundwaves(
+          ctx,
+          w,
+          h,
+          activeRightFingers,
+          Boolean(detectedChord),
+          wavePhaseRef.current
         );
-        ctx.restore();
 
         animationFrameRef.current = requestAnimationFrame(processFrame);
       };
@@ -383,71 +448,192 @@ export default function GestureChordTracker() {
     };
   }, []);
 
+  const activeRootNote = currentActiveChord
+    ? currentActiveChord.replace(/maj|min|dim|aug|7$/, "")
+    : null;
+
+  const activeType = currentActiveChord?.endsWith("maj")
+    ? "MAJOR"
+    : currentActiveChord?.endsWith("min")
+      ? "MINOR"
+      : currentActiveChord?.endsWith("dim")
+        ? "DIMINISHED"
+        : currentActiveChord?.endsWith("aug")
+          ? "AUGMENTED"
+          : currentActiveChord?.endsWith("7")
+            ? "SEVENTH"
+            : null;
+
   return (
-    <div className="fixed inset-0 w-screen h-screen bg-slate-950 overflow-hidden z-50">
+    <div className="fixed inset-0 w-screen h-screen bg-[#0d1117] text-slate-100 font-sans overflow-hidden select-none z-50">
       <video ref={videoRef} style={{ display: "none" }} playsInline muted />
 
-      <div className="relative w-full h-full bg-slate-900 flex items-center justify-center">
-        <canvas ref={canvasRef} className="w-full h-full block" />
+      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full block" />
 
-        {appState === "IDLE" && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md p-6 text-center">
-            <div className="w-16 h-16 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center mb-4 ring-1 ring-amber-500/40 animate-pulse">
-              <svg className="w-8 h-8 fill-current" viewBox="0 0 24 24">
-                <path d="M12 3v10.55c-.59-.34-1.27-.55-2-.55-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4V7h4V3h-6z" />
-              </svg>
+      {/* TOP NAVIGATION BAR */}
+      {appState === "READY" && (
+        <header className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-8 py-6 pointer-events-auto">
+          <div className="flex items-center gap-6">
+            <h1 className="text-2xl font-black tracking-wider text-white font-mono uppercase">
+              Gesture Synth
+            </h1>
+            <nav className="flex items-center gap-2">
+              <button className="px-4 py-1.5 bg-[#2dd4bf] text-slate-950 font-bold rounded-full text-xs transition">
+                Gesture
+              </button>
+              <button className="px-4 py-1.5 bg-[#161b22]/80 hover:bg-[#21262d] text-slate-300 font-medium rounded-full text-xs transition border border-slate-700/50">
+                Theremin
+              </button>
+              <button className="px-4 py-1.5 bg-[#161b22]/80 hover:bg-[#21262d] text-slate-300 font-medium rounded-full text-xs transition border border-slate-700/50">
+                Help
+              </button>
+            </nav>
+            <div className="flex items-center gap-2 ml-2">
+              <button className="px-3.5 py-1.5 bg-[#161b22]/80 hover:bg-[#21262d] text-slate-300 font-medium rounded-full text-xs transition border border-slate-700/50">
+                Settings
+              </button>
+              <button className="px-3.5 py-1.5 bg-[#161b22]/80 hover:bg-[#21262d] text-slate-300 font-medium rounded-full text-xs transition border border-slate-700/50">
+                Learn a song
+              </button>
+              <button className="px-3.5 py-1.5 bg-[#161b22]/80 hover:bg-[#21262d] text-slate-300 font-medium rounded-full text-xs transition border border-slate-700/50">
+                Community
+              </button>
             </div>
-            <h2 className="text-3xl font-bold text-white mb-2 tracking-tight">
-              Gesture Chord Player (Full Screen)
-            </h2>
-            <p className="text-slate-400 max-w-lg mb-8 text-sm leading-relaxed">
-              Tampilkan kombinasi jari tangan kiri &amp; kanan pada kamera untuk memicu nada chord secara langsung di seluruh layar.
-            </p>
-            <button
-              onClick={handleStart}
-              className="px-8 py-3.5 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-semibold rounded-full shadow-lg shadow-amber-500/25 transition duration-200 transform hover:scale-105 active:scale-95 flex items-center gap-2"
-            >
-              <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-              MULAI FULL SCREEN
-            </button>
           </div>
-        )}
 
-        {appState !== "IDLE" && appState !== "READY" && appState !== "ERROR" && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md p-6 text-center">
-            <div className="w-12 h-12 border-4 border-amber-500/30 border-t-amber-500 rounded-full animate-spin mb-4" />
-            <p className="text-lg font-medium text-amber-400 mb-1">{statusMessage}</p>
-          </div>
-        )}
-
-        {appState === "ERROR" && (
-          <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-slate-950/90 backdrop-blur-md p-6 text-center">
-            <p className="text-red-400 font-semibold mb-2">{errorMessage}</p>
-            <button
-              onClick={handleStart}
-              className="mt-2 px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-lg text-sm font-medium transition"
-            >
-              Coba Lagi
-            </button>
-          </div>
-        )}
-
-        {appState === "READY" && (
-          <div className="absolute top-6 right-6 z-10 flex items-center gap-3 bg-slate-900/80 backdrop-blur border border-slate-700/60 rounded-xl px-5 py-2.5 text-white shadow-xl">
-            <div
-              className={`w-3.5 h-3.5 rounded-full ${
-                currentActiveChord ? "bg-amber-500 animate-ping" : "bg-emerald-500"
-              }`}
-            />
-            <span className="text-xs font-mono text-slate-400">CHORD AKTIF:</span>
-            <span className="text-xl font-bold text-amber-400 min-w-16">
-              {currentActiveChord ? currentActiveChord : "None"}
+          <div className="flex flex-col items-end gap-1 text-xs font-mono text-slate-400">
+            <div className="flex gap-0.5">
+              {[...Array(8)].map((_, i) => (
+                <div
+                  key={i}
+                  className={`w-1 h-3 rounded-sm ${currentActiveChord ? "bg-[#2dd4bf]" : "bg-slate-700"
+                    }`}
+                />
+              ))}
+            </div>
+            <span className="font-bold text-[#2dd4bf]">
+              Tone: {tonePercent >= 0 ? `+${tonePercent}%` : `${tonePercent}%`}
             </span>
           </div>
-        )}
-      </div>
+        </header>
+      )}
+
+      {/* CENTER VISUAL FEEDBACK */}
+      {appState === "READY" && (
+        <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+          <div className="flex items-center gap-3 mb-2">
+            <div
+              className={`h-2.5 w-10 rounded-sm transition-all duration-150 ${currentActiveChord
+                  ? "bg-[#2dd4bf] shadow-[0_0_12px_#2dd4bf]"
+                  : "bg-slate-700/50"
+                }`}
+            />
+            <div
+              className={`h-2.5 w-10 rounded-sm transition-all duration-150 ${currentActiveChord
+                  ? "bg-[#2dd4bf] shadow-[0_0_12px_#2dd4bf]"
+                  : "bg-slate-700/50"
+                }`}
+            />
+          </div>
+          <span className="font-mono text-sm tracking-widest text-slate-400 font-semibold">
+            {currentActiveChord
+              ? `${currentActiveChord} (${activeType})`
+              : "--"}
+          </span>
+        </div>
+      )}
+
+      {/* BOTTOM CHORD CARDS BAR */}
+      {appState === "READY" && (
+        <footer className="absolute bottom-6 left-0 right-0 z-10 flex flex-col items-center pointer-events-auto px-6">
+          <p className="text-[11px] font-mono tracking-wider uppercase text-slate-400 mb-3">
+            LEFT HAND: NOTE • RIGHT HAND: MODE (1-5 FINGERS) & TILT FOR TONE
+          </p>
+
+          <div className="flex items-center justify-center gap-2.5 max-w-5xl w-full">
+            {CHORD_CARDS.map((card) => {
+              const isActive = activeRootNote === card.key;
+              return (
+                <div
+                  key={card.key}
+                  className={`flex-1 flex flex-col items-center justify-center py-3 px-2 rounded-2xl border transition-all duration-200 ${isActive
+                      ? "bg-[#2dd4bf] border-[#2dd4bf] text-slate-950 shadow-[0_0_20px_rgba(45,212,191,0.4)] scale-105"
+                      : "bg-[#161b22]/85 border-slate-800 text-white hover:bg-[#21262d]"
+                    }`}
+                >
+                  <span className="text-xl font-black font-mono tracking-tight">
+                    {card.note}
+                  </span>
+                  <span
+                    className={`text-[10px] font-mono mt-0.5 tracking-tight ${isActive ? "text-slate-900 font-bold" : "text-slate-400"
+                      }`}
+                  >
+                    {card.fingers}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <div className="flex items-center justify-between w-full max-w-5xl mt-5 text-[11px] font-mono text-slate-400">
+            <div className="flex items-center gap-2">
+              <span className="px-3 py-1 bg-[#161b22]/80 border border-slate-800 rounded-full">
+                Instagram
+              </span>
+              <span className="px-3 py-1 bg-[#161b22]/80 border border-slate-800 rounded-full">
+                Discord
+              </span>
+              <span className="px-3 py-1 bg-[#161b22]/80 border border-slate-800 rounded-full">
+                TikTok
+              </span>
+              <span className="px-3 py-1 bg-[#161b22]/80 border border-slate-800 rounded-full">
+                YouTube
+              </span>
+            </div>
+
+            <div className="bg-[#161b22]/80 border border-slate-800 px-4 py-1 rounded-full">
+              Left: {leftCount} fingers | Right: {rightCount} fingers ({activeType || "None"})
+            </div>
+          </div>
+        </footer>
+      )}
+
+      {/* OVERLAY SCREEN */}
+      {appState === "IDLE" && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0d1117]/95 backdrop-blur-md p-6 text-center">
+          <h1 className="text-5xl font-black tracking-wider text-white font-mono uppercase mb-3">
+            Gesture Synth
+          </h1>
+          <p className="text-slate-400 max-w-md mb-8 text-sm font-mono leading-relaxed">
+            Mainkan nada dan chord musik secara interaktif dengan gestur jari tangan Anda langsung di depan kamera.
+          </p>
+          <button
+            onClick={handleStart}
+            className="px-10 py-4 bg-[#2dd4bf] hover:bg-[#26b8a5] text-slate-950 font-black font-mono tracking-wider rounded-full shadow-lg shadow-[#2dd4bf]/20 transition duration-200 transform hover:scale-105 active:scale-95"
+          >
+            START SYNTHESIZER
+          </button>
+        </div>
+      )}
+
+      {appState !== "IDLE" && appState !== "READY" && appState !== "ERROR" && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0d1117]/95 backdrop-blur-md p-6 text-center font-mono">
+          <div className="w-12 h-12 border-4 border-[#2dd4bf]/30 border-t-[#2dd4bf] rounded-full animate-spin mb-4" />
+          <p className="text-base text-[#2dd4bf]">{statusMessage}</p>
+        </div>
+      )}
+
+      {appState === "ERROR" && (
+        <div className="absolute inset-0 z-20 flex flex-col items-center justify-center bg-[#0d1117]/95 backdrop-blur-md p-6 text-center font-mono">
+          <p className="text-red-400 font-semibold mb-3">{errorMessage}</p>
+          <button
+            onClick={handleStart}
+            className="px-6 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-full text-xs transition"
+          >
+            Try Again
+          </button>
+        </div>
+      )}
     </div>
   );
 }

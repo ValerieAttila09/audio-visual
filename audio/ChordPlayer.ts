@@ -2,6 +2,8 @@ export class ChordPlayer {
 	private context: AudioContext | null = null;
 	private buffers: Map<string, AudioBuffer>;
 	private currentSource: AudioBufferSourceNode | null = null;
+	private currentGainNode: GainNode | null = null;
+	private currentChordName: string | null = null;
 
 	constructor() {
 		this.buffers = new Map();
@@ -23,7 +25,6 @@ export class ChordPlayer {
 		}
 	}
 
-	// try loading common file extensions and naming conventions
 	private async tryFetchChordPaths(name: string): Promise<Response | null> {
 		const candidates = [
 			`/audio/chords/${name}.mp3`,
@@ -54,23 +55,16 @@ export class ChordPlayer {
 	}
 
 	async loadAll(onProgress?: (loaded: number, total: number) => void) {
-		// load major/minor sequences used by the app
-		const chordKeys = [
-			"Cmaj",
-			"Dmaj",
-			"Emaj",
-			"Fmaj",
-			"Gmaj",
-			"Amaj",
-			"Bmaj",
-			"Cmin",
-			"Dmin",
-			"Emin",
-			"Fmin",
-			"Gmin",
-			"Amin",
-			"Bmin",
-		];
+		const roots = ["C", "D", "E", "F", "G", "A", "B"];
+		const suffixes = ["maj", "min", "dim", "aug", "7"];
+
+		const chordKeys: string[] = [];
+		for (const suffix of suffixes) {
+			for (const root of roots) {
+				chordKeys.push(`${root}${suffix}`);
+			}
+		}
+
 		let loadedCount = 0;
 		for (const name of chordKeys) {
 			try {
@@ -84,6 +78,18 @@ export class ChordPlayer {
 	}
 
 	playChord(name: string, pitchFactor = 1) {
+		const ctx = this.getOrCreateContext();
+		if (ctx.state === "suspended") {
+			ctx.resume();
+		}
+
+		// 1. Jika chord yang dimainkan SAMA dan audio masih jalan, cukup ubah pitch-nya secara halus
+		if (this.currentChordName === name && this.currentSource && this.currentGainNode) {
+			this.currentSource.playbackRate.setTargetAtTime(pitchFactor, ctx.currentTime, 0.05);
+			return;
+		}
+
+		// 2. Jika chord beda, hentikan chord sebelumnya dengan Fade-Out mulus (30ms)
 		this.stopChord();
 
 		const buffer = this.buffers.get(name);
@@ -92,30 +98,58 @@ export class ChordPlayer {
 			return;
 		}
 
-		const ctx = this.getOrCreateContext();
-		if (ctx.state === "suspended") {
-			ctx.resume();
-		}
-
+		// 3. Buat Source Node & Gain Node Baru
 		const source = ctx.createBufferSource();
 		source.buffer = buffer;
+		
+		// Mengaktifkan Seamless Looping Bawaan Web Audio API
+		source.loop = true;
 		source.playbackRate.value = pitchFactor;
-		const gain = ctx.createGain();
-		gain.gain.value = 1;
-		source.connect(gain).connect(ctx.destination);
-		source.start();
+
+		const gainNode = ctx.createGain();
+		
+		// 4. Efek Fade-In Tipis (20ms) untuk mencegah suara "Klik/Pop" saat mulai
+		gainNode.gain.setValueAtTime(0, ctx.currentTime);
+		gainNode.gain.linearRampToValueAtTime(1, ctx.currentTime + 0.02);
+
+		source.connect(gainNode).connect(ctx.destination);
+		source.start(0);
+
 		this.currentSource = source;
+		this.currentGainNode = gainNode;
+		this.currentChordName = name;
 	}
 
 	stopChord() {
-		if (this.currentSource) {
+		if (this.currentSource && this.currentGainNode && this.context) {
+			const ctx = this.context;
+			const source = this.currentSource;
+			const gainNode = this.currentGainNode;
+
+			// Fade-Out tipis (30ms) sebelum mematikan suara agar tidak patah/pop
 			try {
-				this.currentSource.stop();
-				this.currentSource.disconnect();
+				gainNode.gain.setValueAtTime(gainNode.gain.value, ctx.currentTime);
+				gainNode.gain.linearRampToValueAtTime(0.001, ctx.currentTime + 0.03);
+
+				setTimeout(() => {
+					try {
+						source.stop();
+						source.disconnect();
+						gainNode.disconnect();
+					} catch (e) {
+						// abaikan jika sudah terhenti
+					}
+				}, 35);
 			} catch (e) {
-				// Ignore if already stopped
+				try {
+					source.stop();
+					source.disconnect();
+				} catch (err) {}
 			}
+
 			this.currentSource = null;
+			this.currentGainNode = null;
+			this.currentChordName = null;
 		}
 	}
 }
